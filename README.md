@@ -6,7 +6,7 @@ It follows the semantics of the CSHF semantics described
 in the paper
 
 
-Manfred Schmidt-Schauss and David Sabel
+Manfred Schmidt-Schauss and David Sabel:
 Correctness of an STM Haskell implementation. 
 In ICFP'13, pages 161-172, New York, NY, USA, September 2013. ACM.
 

@@ -143,6 +143,9 @@ atomically act =
                                                    globalRetry tlog
                                                    atomically act)
                    other -> throw e)
+
+
+                   
 performSTM tlog act =
   case act of 
     Return a -> do
@@ -153,10 +156,6 @@ performSTM tlog act =
                mid <- myThreadId
                sPutStrLn ((show mid) ++  " USERDEFINED RETRY !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
 #endif
-               x <- newEmptyMVar
-               let waitForExternalRetry = 
-                      do
-                       catch (takeMVar x >> return undefined) (\e -> seq (e:: (BlockedIndefinitelyOnMVar)) (waitForExternalRetry))
                waitForExternalRetry
     NewTVar x cont -> do
                        tv <- newTVarWithLog tlog x
@@ -202,5 +201,12 @@ performOrElseLeft tlog  act =
                                             performOrElseLeft tlog (act2 >>= cont) 
 
                                             
-                                            
+waitForExternalRetry = 
+ do
+  x <- newEmptyMVar
+  wait x
+   where wait x  =  
+            catch (takeMVar x >> return undefined) 
+                  (\e -> case e of BlockedIndefinitelyOnMVar -> wait x
+                                   _ -> throw e)
     

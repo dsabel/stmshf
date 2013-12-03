@@ -134,7 +134,7 @@ atomically act =
     sPutStrLn (show mid ++ " starts transaction")
 #endif
     tlog <- emptyTLOG
-    catch (performSTM tlog act act) 
+    catch (performSTM tlog act) 
           (\e -> case e of
                    RetryException ->  mask_ ( do 
 #ifdef DEBUG    
@@ -143,7 +143,7 @@ atomically act =
                                                    globalRetry tlog
                                                    atomically act)
                    other -> throw e)
-performSTM tlog act origact =
+performSTM tlog act =
   case act of 
     Return a -> do
                commit tlog
@@ -160,21 +160,21 @@ performSTM tlog act origact =
                waitForExternalRetry
     NewTVar x cont -> do
                        tv <- newTVarWithLog tlog x
-                       performSTM tlog (cont tv) origact
+                       performSTM tlog (cont tv) 
     ReadTVar x cont -> do 
                         res <- readTVarWithLog tlog x
-                        performSTM tlog (cont res) origact
+                        performSTM tlog (cont res) 
     WriteTVar v x cont -> do
                            writeTVarWithLog tlog v x
-                           performSTM tlog cont origact
+                           performSTM tlog cont 
     OrElse act1 act2 cont -> do           
                               orElseWithLog tlog -- adjust for left orElse
                               resl <- performOrElseLeft tlog act1
                               case resl of
-                                Just a -> performSTM tlog (cont a) origact
+                                Just a -> performSTM tlog (cont a) 
                                 Nothing -> do
                                             orRetryWithLog tlog
-                                            performSTM tlog (act2 >>= cont) origact
+                                            performSTM tlog (act2 >>= cont) 
                                 
 performOrElseLeft :: (TLOG) -> STM a -> IO (Maybe a)
 performOrElseLeft tlog  act = 

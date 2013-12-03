@@ -129,22 +129,21 @@ newTVarIO x = atomically (newTVar x)
 atomically :: STM a -> IO a
 atomically act =
   do
-    mid <- myThreadId
 #ifdef DEBUG    
+    mid <- myThreadId
     sPutStrLn (show mid ++ " starts transaction")
 #endif
-    l <- emptyTLOG
-    catch (perform l act act) (\RetryException -> 
-      do
-       mask_ (
-        do 
+    tlog <- emptyTLOG
+    catch (performSTM tlog act act) 
+          (\e -> case e of
+                   RetryException ->  mask_ ( do 
 #ifdef DEBUG    
-        sPutStrLn ((show mid) ++  " got retry")
+                                                   sPutStrLn ((show mid) ++  " got retry")
 #endif
-        globalRetry l)
-       atomically act)
-
-perform tlog act origact =
+                                                   globalRetry tlog
+                                                   atomically act)
+                   other -> throw e)
+performSTM tlog act origact =
   case act of 
     Return a -> do
                commit tlog
@@ -161,21 +160,21 @@ perform tlog act origact =
                waitForExternalRetry
     NewTVar x cont -> do
                        tv <- newTVarWithLog tlog x
-                       perform tlog (cont tv) origact
+                       performSTM tlog (cont tv) origact
     ReadTVar x cont -> do 
                         res <- readTVarWithLog tlog x
-                        perform tlog (cont res) origact
+                        performSTM tlog (cont res) origact
     WriteTVar v x cont -> do
                            writeTVarWithLog tlog v x
-                           perform tlog cont origact
+                           performSTM tlog cont origact
     OrElse act1 act2 cont -> do           
                               orElseWithLog tlog -- adjust for left orElse
                               resl <- performOrElseLeft tlog act1
                               case resl of
-                                Just a -> perform tlog (cont a) origact
+                                Just a -> performSTM tlog (cont a) origact
                                 Nothing -> do
                                             orRetryWithLog tlog
-                                            perform tlog (act2 >>= cont) origact
+                                            performSTM tlog (act2 >>= cont) origact
                                 
 performOrElseLeft :: (TLOG) -> STM a -> IO (Maybe a)
 performOrElseLeft tlog  act = 

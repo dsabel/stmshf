@@ -251,11 +251,12 @@ grabLocks mid ((ptvar@(TVarAny (_,tvany))):xs) held =
              waiton <- newEmptyMVar
              l <- takeMVar (waitingQueue _tvany)
              putMVar (waitingQueue _tvany) (l ++ [waiton])
+             putMVar tvany _tvany
              mapM_ (\(TVarAny (_,tvany)) -> do
                                                           _tv <- takeMVar tvany
                                                           takeMVar (lock _tv)
-                                                          putMVar tvany _tv) held
-             putMVar tvany _tvany
+                                                          putMVar tvany _tv)
+                                                          held
              return (Left waiton)
                           
      

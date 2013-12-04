@@ -154,7 +154,7 @@ performSTM tlog act =
     Retry  -> do
 #ifdef DEBUG    
                mid <- myThreadId
-               sPutStrLn ((show mid) ++  " USERDEFINED RETRY !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+               sPutStrLn ((show mid) ++  "USERDEFINED RETRY")
 #endif
                waitForExternalRetry -- wait forever until a retry-exception is received
     NewTVar x cont -> do

@@ -156,7 +156,7 @@ performSTM tlog act =
                mid <- myThreadId
                sPutStrLn ((show mid) ++  " USERDEFINED RETRY !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
 #endif
-               waitForExternalRetry
+               waitForExternalRetry -- wait forever until a retry-exception is received
     NewTVar x cont -> do
                        tv <- newTVarWithLog tlog x
                        performSTM tlog (cont tv) 

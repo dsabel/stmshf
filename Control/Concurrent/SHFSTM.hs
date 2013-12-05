@@ -136,12 +136,13 @@ atomically act =
     tlog <- emptyTLOG
     catch (performSTM tlog act) 
           (\e -> case e of
-                   RetryException ->  mask_ ( do 
+                   RetryException ->  do
+                                       mask_ ( do 
 #ifdef DEBUG    
                                                    sPutStrLn ((show mid) ++  " got retry")
 #endif
-                                                   globalRetry tlog
-                                                   atomically act)
+                                                   globalRetry tlog)
+                                       atomically act
                    other -> throw e)
 
 

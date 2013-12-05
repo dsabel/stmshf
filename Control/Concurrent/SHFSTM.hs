@@ -57,7 +57,11 @@ data STM a = Return a
            | Retry  
            | forall b. OrElse (STM b) (STM b) (b -> STM a) 
 
- 
+
+
+instance  Functor STM where
+   fmap f x = x >>= (return . f)
+   
 -- | The monad instance for 'STM'
 instance Monad STM where
   return = Return

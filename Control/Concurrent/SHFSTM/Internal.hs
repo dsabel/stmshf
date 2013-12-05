@@ -265,9 +265,8 @@ grabLocks mid ((ptvar@(TVarAny (_,tvany))):xs) held =
            
            
            
--- | 'writeClearWithLog' removes the notify entries of the committing transaction
-writeClearWithLog (TLOG tlog) [] = return ()
-writeClearWithLog (TLOG tlog) ((TVarAny (id,tvany)):xs) =
+iterateClearWithLog (TLOG tlog) [] = return ()
+iterateClearWithLog (TLOG tlog) ((TVarAny (id,tvany)):xs) =
   do
     mid <- myThreadId
     mask_ $
@@ -278,15 +277,16 @@ writeClearWithLog (TLOG tlog) ((TVarAny (id,tvany)):xs) =
        -- remove thread id from notify list:
        putMVar  (notifyList _tvany) (Set.delete mid ns)
        putMVar tvany _tvany
-    writeClearWithLog (TLOG tlog) xs    
+    iterateClearWithLog (TLOG tlog) xs    
 -- iterate clearWrite as long as possible (i.e. until the T-List is empty)
 -- Note: the iteration is not atomic (as in the paper)
-    
-iterateClearWithLog (TLOG tlog) =
+
+-- | 'writeClearWithLog' removes the notify entries of the committing transaction    
+writeClearWithLog (TLOG tlog) =
   do 
     lg <- readIORef tlog  -- access the Log-File
     let xs =  Set.elems (readTVars lg)
-    writeClearWithLog (TLOG tlog) xs
+    iterateClearWithLog (TLOG tlog) xs
     writeIORef tlog (lg{readTVars=Set.empty})
 
      
@@ -302,11 +302,10 @@ getIds ((TVarAny (_,tvany)):xs) ls =
 
 -- | 'sendRetryWithLog' sends exceptions to the conflicting threads
   
-sendRetryWithLog :: Set.Set ThreadId -- ^ the already notfied threads
-                 -> TLOG -- ^ the transaction log
+sendRetryWithLog :: TLOG -- ^ the transaction log
                  -> IO ()
                  
-sendRetryWithLog sent (TLOG tlog) =
+sendRetryWithLog (TLOG tlog) =
   mask_ $ 
    do
     lg <- readIORef tlog  -- access the Log-File
@@ -489,13 +488,13 @@ commit (TLOG tlog) =
    -- debugTLOG (tlog)   
 #endif
 --    yield 
-   iterateClearWithLog (TLOG tlog)     -- clearWrite phase
+   writeClearWithLog (TLOG tlog)     -- clearWrite phase
 #ifdef DEBUG                    
    sPutStrLn (show mid  ++ " clearWith finished")
    -- debugTLOG (tlog)
 #endif
 --    yield 
-   sendRetryWithLog (Set.empty) (TLOG tlog) -- sendRetry phase
+   sendRetryWithLog  (TLOG tlog) -- sendRetry phase
 #ifdef DEBUG                    
    sPutStrLn (show mid ++ " sendRetry finished")
    -- debugTLOG (tlog)   

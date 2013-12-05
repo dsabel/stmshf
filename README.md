@@ -1,10 +1,6 @@
+This repository contains an alternative implementation of STM Haskell in Haskell
 
-This repository contains an alternative implementation
-of STM Haskell in Haskell
-
-It follows the semantics of the CSHF semantics described
-in the paper
-
+It follows the semantics of the CSHF calculus described in the paper
 
 Manfred Schmidt-Schauss and David Sabel:
 Correctness of an STM Haskell implementation. 

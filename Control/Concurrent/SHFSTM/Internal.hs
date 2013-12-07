@@ -86,13 +86,13 @@ newTVarWithLog (TLOG tlog) content =
     let tva   = TVarA content_tvarx
     let tvar = TVar (tva,tvany)
     -- ------------- 
-    if (Set.member tvany ln) then error "PAAAAAAAAAAAAAAANNNNNNNNNNNNNNNICCCCCCCCCCCC"
-     else do
-      writeIORef tlog (lg{tripelStack=((Set.insert tvany la,Set.insert tvany ln,lw):xs)}) -- adjust the Transaction Log
 #ifdef DEBUG                    
+    if (Set.member tvany ln) then error "PANIC"
+     else do
       sPutStrLn (show mid ++ " creates local TVar *********" ++ show tvany)
 #endif                 
-      return tvar
+    writeIORef tlog (lg{tripelStack=((Set.insert tvany la,Set.insert tvany ln,lw):xs)}) -- adjust the Transaction Log
+    return tvar
 
     
 
@@ -120,15 +120,6 @@ tryReadTVarWithLog (TLOG tlog) ptvar@(TVar (TVarA tva,tvany@(TVarAny tx))) = uni
     lg <- readIORef tlog  -- access the Log-File
     let ((la,ln,lw):xs) = tripelStack lg
     mid <- myThreadId        -- the ThreadId
-#ifdef DEBUG       
-    -- putStrLn (show mid ++ " reads " ++ show tvany)
-#endif        
-    
-    -- loc <- readIORef (local r)
-    -- let f = case loc of 
-               -- Nothing -> False
-               -- Just x -> not( mid == x)
-    -- if f then error ("PPPPPPPPPPPPPPPPPPPPPPPPPPPPPPAAAAAAAAAAAAAAANNIC Thread" ++ show mid ++ " accesses TVar " ++ show tvany ) else
     if tvany `Set.member` la then do
       -- x in L_a, local copy exists
       uninterruptibleMask_ (

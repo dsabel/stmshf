@@ -45,8 +45,12 @@ import Control.Concurrent.SHFSTM.Internal.Debug(sPutStrLn)
 -- | The 'RetryException' is thrown from the committing transaction
 -- to conflicting transactions
 
-data RetryException = RetryException
-     deriving (Show, Typeable)
+
+
+
+  
+data RetryException = RetryException 
+     deriving (Typeable,Show)
 
 instance Exception RetryException
 
@@ -55,7 +59,8 @@ newTVarWithLog :: TLOG      -- ^ the transaction log
                -> a         -- ^ the content of the TVar
                -> IO (TVar a)
 newTVarWithLog (TLOG tlog) content =
-  do
+  uninterruptibleMask_ $
+   do
     mid <- myThreadId
     tvar_Id <- nextCounter
     lg <- readIORef tlog                   -- access the Transaction-Log
@@ -63,21 +68,31 @@ newTVarWithLog (TLOG tlog) content =
     -- Create the TVar  ...
     content_global <- newMVar content       -- set global content
     pointer_local_content <- newIORef [content]
-    content_local   <- newMVar (Map.insert mid pointer_local_content Map.empty)     
+    let mp = (Map.insert mid pointer_local_content Map.empty)     
+    content_local   <- seq mp (newMVar mp)
     notify_list     <- newMVar (Set.empty)
     unset_lock      <- newEmptyMVar
+    -- loc <- newIORef (Just mid)
     content_waiting_queue <- newMVar []                  -- empty broadcast list
     content_tvarx <-         newMVar (TV {globalContent = content_global,
                                   localContent  = content_local,
                                   notifyList    = notify_list,
                                   lock          = unset_lock,   
-                                  waitingQueue  = content_waiting_queue})
+                                  waitingQueue  = content_waiting_queue
+                                  -- local = loc
+                                  })
+                                         
     let tvany = TVarAny (tvar_Id,content_tvarx)
     let tva   = TVarA content_tvarx
     let tvar = TVar (tva,tvany)
     -- ------------- 
-    writeIORef tlog (lg{tripelStack=((Set.insert tvany la,Set.insert tvany ln,lw):xs)}) -- adjust the Transaction Log
-    return tvar
+    if (Set.member tvany ln) then error "PAAAAAAAAAAAAAAANNNNNNNNNNNNNNNICCCCCCCCCCCC"
+     else do
+      writeIORef tlog (lg{tripelStack=((Set.insert tvany la,Set.insert tvany ln,lw):xs)}) -- adjust the Transaction Log
+#ifdef DEBUG                    
+      sPutStrLn (show mid ++ " creates local TVar *********" ++ show tvany)
+#endif                 
+      return tvar
 
     
 
@@ -85,49 +100,67 @@ newTVarWithLog (TLOG tlog) content =
 readTVarWithLog :: TLOG   -- ^ the transaction log
                 -> TVar a -- ^ the  'TVar'
                 -> IO a   -- ^ the content of the 'TVar' (local)
-readTVarWithLog (TLOG tlog) ptvar =
+readTVarWithLog (TLOG tlog) (ptvar@(TVar (_,tvany))) =
  do
+  
   res <- tryReadTVarWithLog (TLOG tlog) ptvar
   case res of
-    Just r -> return r
-    Nothing -> readTVarWithLog (TLOG tlog) ptvar
+    Right r -> return r
+    Left blockvar -> do
+                     mid <- myThreadId
+#ifdef DEBUG    
+                     sPutStrLn (show mid ++ "wait in read on TVar" ++ show tvany)
+#endif
+                     takeMVar blockvar
+                     readTVarWithLog (TLOG tlog) ptvar
     
-tryReadTVarWithLog (TLOG tlog) ptvar@(TVar (TVarA tva,tvany)) =
+tryReadTVarWithLog (TLOG tlog) ptvar@(TVar (TVarA tva,tvany@(TVarAny tx))) = uninterruptibleMask_ $
   do
+    _tva <-  takeMVar tva  -- access the TVar
     lg <- readIORef tlog  -- access the Log-File
     let ((la,ln,lw):xs) = tripelStack lg
     mid <- myThreadId        -- the ThreadId
+#ifdef DEBUG       
+    -- putStrLn (show mid ++ " reads " ++ show tvany)
+#endif        
+    
+    -- loc <- readIORef (local r)
+    -- let f = case loc of 
+               -- Nothing -> False
+               -- Just x -> not( mid == x)
+    -- if f then error ("PPPPPPPPPPPPPPPPPPPPPPPPPPPPPPAAAAAAAAAAAAAAANNIC Thread" ++ show mid ++ " accesses TVar " ++ show tvany ) else
     if tvany `Set.member` la then do
       -- x in L_a, local copy exists
-      mask_ (
+      uninterruptibleMask_ (
        do       
-        _tva <-  takeMVar tva  -- access the TVar
-        localmap <- readMVar (localContent _tva)
+        localmap <- readMVar  (localContent _tva)
         lk <- readIORef $ fromJust $ Map.lookup mid localmap
         let (x:xs) = lk
         putMVar tva _tva
-        return (Just x)        
+        return (Right x)        
         )
-     else                  
+      else                  
       -- TVar not in read TVars
        do
-        mask_ ( 
+        uninterruptibleMask_ ( 
          do 
-          _tva <- takeMVar tva
           b <- isEmptyMVar (lock _tva)
           if b -- not locked
            then 
                 do
                  nl <- takeMVar (notifyList _tva) 
                  putMVar (notifyList _tva) (Set.insert mid nl) -- add to notifyList
-                 globalC <- readMVar (globalContent _tva) -- read global content
+                 globalC <- readMVar  (globalContent _tva) -- read global content
                  content_local <- newIORef [globalC]
                  mp <- takeMVar (localContent _tva)
-                 putMVar (localContent _tva) (Map.insert mid content_local mp)        -- copy to local tvar stack
-                             -- adjust the transaction log
                  writeIORef tlog (lg{readTVars = Set.insert tvany (readTVars lg),tripelStack = ((Set.insert tvany la,ln,lw):xs)})
+                 putMVar (localContent _tva) (Map.insert mid content_local mp)        -- copy to local tvar stack
+#ifdef DEBUG
+                 putStrLn (show mid ++ " has created local content for " ++ show tvany)
+#endif                 
+                             -- adjust the transaction log
                  putMVar tva _tva
-                 return (Just globalC)
+                 return (Right globalC)
       
            else -- locked
                 do 
@@ -136,10 +169,9 @@ tryReadTVarWithLog (TLOG tlog) ptvar@(TVar (TVarA tva,tvany)) =
                  putMVar (waitingQueue _tva) (wq ++ [blockvar])
                  putMVar tva _tva
 #ifdef DEBUG                    
-                 sPutStrLn (show mid ++ "wait in readTVar")
+                 -- sPutStrLn (show mid ++ "wait in readTVar")
 #endif                 
-                 takeMVar blockvar
-                 return Nothing
+                 return (Left blockvar)
            )
 
 -- | 'writeTVarWithLog' performs the writeTVar operation and 
@@ -149,55 +181,55 @@ writeTVarWithLog :: TLOG   -- ^ the transaction log
                   -> a      -- ^ the new content
                   -> IO ()  
 
-writeTVarWithLog (TLOG tlog) ptvar con =
+writeTVarWithLog (TLOG tlog) ptvar@(TVar (_,tvany)) con =
  do
   res <- tryWriteTVarWithLog (TLOG tlog) ptvar con
   case res of
-    Just r -> return r
-    Nothing -> writeTVarWithLog (TLOG tlog) ptvar con
-
-tryWriteTVarWithLog :: TLOG   -- ^ the transaction log
-                  -> TVar a -- ^ the  'TVar'
-                  -> a      -- ^ the new content
-                  -> IO (Maybe ())  
-    
+    Right r -> return r
+    Left blockvar -> do
+#ifdef DEBUG    
+                      mid <- myThreadId
+                      sPutStrLn (show mid ++ "wait in write on TVar" ++ show tvany)
+#endif
+                      takeMVar blockvar
+                      writeTVarWithLog (TLOG tlog) ptvar con
+   
 tryWriteTVarWithLog (TLOG tlog) ptvar@(TVar (TVarA tva,tvany@(TVarAny (id,m)))) con =
-  do
+ uninterruptibleMask_ $ do
+    _tva <-  takeMVar tva  -- access the TVar
     lg <- readIORef tlog  -- access the Log-File
     let ((la,ln,lw):xs) = tripelStack lg
     mid <- myThreadId        -- the ThreadId
     if tvany `Set.member` la then do
       -- x in L_a, local copy exists
-      mask_ (
+      uninterruptibleMask_ (
        do       
-        _tva <-  takeMVar tva  -- access the TVar
-        localmap <- readMVar (localContent _tva)
+        localmap <- readMVar  (localContent _tva)
         let ioref_with_old_content = fromJust $ Map.lookup mid localmap
         lk <- readIORef ioref_with_old_content 
         let (x:ys) = lk
         writeIORef  ioref_with_old_content (con:ys)
         writeIORef tlog (lg{tripelStack = ((la,ln,Set.insert (tvany) lw):xs)})
         putMVar tva _tva
-        return $ Just ()
+        return $ Right ()
         )
      else                  
       -- TVar not in read TVars
        do
-        mask_ ( 
+        uninterruptibleMask_ ( 
          do 
-          _tva <- takeMVar tva
           b <- isEmptyMVar (lock _tva)
           if b -- not locked
            then 
                 do
-                 globalC <- readMVar (globalContent _tva) -- read global content
+                 globalC <- readMVar  (globalContent _tva) -- read global content
                  content_local <- newIORef [con]
                  mp <- takeMVar (localContent _tva)
                  putMVar (localContent _tva) (Map.insert mid content_local mp)        -- copy to local tvar stack
                              -- adjust the transaction log
                  writeIORef tlog (lg{readTVars = Set.insert tvany (readTVars lg),tripelStack = ((Set.insert tvany la,ln,Set.insert tvany lw):xs)})
                  putMVar tva _tva
-                 return (Just ())
+                 return (Right ())
       
            else -- locked
                 do 
@@ -206,19 +238,18 @@ tryWriteTVarWithLog (TLOG tlog) ptvar@(TVar (TVarA tva,tvany@(TVarAny (id,m)))) 
                  putMVar (waitingQueue _tva) (wq ++ [blockvar])
                  putMVar tva _tva
 #ifdef DEBUG                    
-                 sPutStrLn (show mid ++ "wait in writeTVar")
+                 -- sPutStrLn (show mid ++ "wait in writeTVar")
 #endif                 
-                 takeMVar blockvar
-                 return Nothing
+                 return (Left blockvar)
+
            )
 
 
 -- | 'writeStartWithLog' starts the commit phase, by 
 -- locking the read and written TVars
            
-writeStartWithLog :: TLOG -- ^ the transaction log
-                     -> IO () 
-writeStartWithLog (TLOG tlog) =
+writeStartWithLog' (TLOG tlog) =
+ uninterruptibleMask_ $
    do
     mid <- myThreadId    
     lg <- readIORef tlog  -- access the Log-File
@@ -226,37 +257,80 @@ writeStartWithLog (TLOG tlog) =
     let ((la,ln,lw):_)  = tripelStack lg
     let t               = readTVars lg
     let xs = (t  `Set.union` ((Set.\\) la  ln))  -- x1,...,xn
-    res <- mask_ (grabLocks mid (Data.List.sort $ Set.elems xs)  [])
+#ifdef DEBUG
+    sPutStrLn (show mid ++ "will lock " ++ show (xs))
+#endif    
+    res <- uninterruptibleMask_ (grabLocks mid (Data.List.sort $ Set.elems xs)  [])
+    case res of
+       Right _ -> do 
+                   writeIORef tlog (lg{lockingSet = xs}) -- K := xs
+#ifdef DEBUG
+                   sPutStrLn (show mid ++ "has locked " ++ show (xs))
+#endif    
+                   return (Right ())
+       Left lock -> return (Left lock)
+    
+writeStartWithLog :: TLOG -- ^ the transaction log
+                     -> IO () 
+writeStartWithLog (TLOG tlog) =
+  do
+    res <- writeStartWithLog' (TLOG tlog)
     case res of 
-     Right _ -> writeIORef tlog (lg{lockingSet = xs}) -- K := xs
      Left lock -> 
       do
+       mid <- myThreadId
 #ifdef DEBUG                    
        sPutStrLn (show mid ++ " busy wait in writeStart")     
 #endif
        takeMVar lock
+       yield
+       threadDelay 1000
        writeStartWithLog (TLOG tlog) 
-
+     Right () -> return ()
      
 grabLocks mid [] _  = return (Right ())     
-grabLocks mid ((ptvar@(TVarAny (_,tvany))):xs) held = 
-  mask_ $ do
+grabLocks mid ((ptvar@(TVarAny (i,tvany))):xs) held = 
+  uninterruptibleMask_ $ do
           _tvany <- takeMVar tvany
+#ifdef DEBUG 
+          mid <- myThreadId                   
+          sPutStrLn (show mid ++ " inside grabLocks for TVar"  ++ show i)   
+#endif
           b <- tryPutMVar (lock _tvany) mid
           if b -- not locked
            then  do
+#ifdef DEBUG 
+             mid <- myThreadId                   
+             sPutStrLn (show mid ++ " has lock for TVar"  ++ show i)   
+   -- debugTLOG (tlog)   
+#endif
              putMVar tvany _tvany
+#ifdef DEBUG 
+             mid <- myThreadId                   
+             sPutStrLn (show mid ++ " outside grabLocks for TVar"  ++ show i)   
+#endif
              grabLocks mid xs (ptvar:held)
+            
             else  do -- already locked
              waiton <- newEmptyMVar
              l <- takeMVar (waitingQueue _tvany)
              putMVar (waitingQueue _tvany) (l ++ [waiton])
              putMVar tvany _tvany
-             mapM_ (\(TVarAny (_,tvany)) -> do
+             mapM_ (\(TVarAny (i,tvany)) -> do
                                                           _tv <- takeMVar tvany
                                                           takeMVar (lock _tv)
-                                                          putMVar tvany _tv)
-                                                          held
+#ifdef DEBUG 
+                                                          mid <- myThreadId                   
+                                                          sPutStrLn (show mid ++ " released lock for TVar"  ++ show i)   
+   -- debugTLOG (tlog)   
+#endif
+                                                         
+                                                          putMVar tvany _tv) (reverse held)
+                                                          
+#ifdef DEBUG 
+             mid <- myThreadId                   
+             sPutStrLn (show mid ++ " outside grabLocks for TVar (with fail)"  ++ show i)   
+#endif        
              return (Left waiton)
                           
      
@@ -269,7 +343,7 @@ iterateClearWithLog (TLOG tlog) [] = return ()
 iterateClearWithLog (TLOG tlog) ((TVarAny (id,tvany)):xs) =
   do
     mid <- myThreadId
-    mask_ $
+    uninterruptibleMask_ $
       do 
        lg <- readIORef tlog
        _tvany <- takeMVar tvany
@@ -294,19 +368,22 @@ writeClearWithLog (TLOG tlog) =
 getIds []                       ls = return (Set.elems ls)          
 getIds ((TVarAny (_,tvany)):xs) ls =
  do
-  _tvany <- takeMVar tvany 
-  l <- takeMVar (notifyList _tvany)
-  putMVar (notifyList _tvany) (Set.empty)
-  putMVar tvany _tvany
+  l <- uninterruptibleMask_
+   (do 
+     _tvany <- takeMVar tvany 
+     l <- takeMVar (notifyList _tvany)
+     putMVar (notifyList _tvany) (Set.empty)
+     putMVar tvany _tvany
+     return l
+    )
   getIds xs (Set.union l ls)
-
 -- | 'sendRetryWithLog' sends exceptions to the conflicting threads
   
 sendRetryWithLog :: TLOG -- ^ the transaction log
                  -> IO ()
                  
 sendRetryWithLog (TLOG tlog) =
-  mask_ $ 
+  uninterruptibleMask_ $ 
    do
     lg <- readIORef tlog  -- access the Log-File
     mid <- myThreadId
@@ -321,6 +398,7 @@ notify (tid:xs) =
 #ifdef DEBUG
    sPutStrLn (show mid ++ " tries to send exception to" ++ show tid)
 #endif
+   -- ack <- newEmptyMVar 
    throwTo tid (RetryException) -- send retry, 
 #ifdef DEBUG
    sPutStrLn (show mid ++ " successfully sent exception to" ++ show tid)
@@ -370,24 +448,38 @@ unlockTVWithLog :: TLOG -- ^ the transaction log
                -> IO ()
 
 unlockTVWithLog (TLOG tlog) =
-  do
+  uninterruptibleMask_ $ do
     lg <- readIORef tlog  -- access the Log-File
     mid <- myThreadId
     let ((la,ln,lw):xs) = tripelStack lg
     let k = lockingSet lg
     unlockTVars (Set.elems k)
+#ifdef DEBUG
+    sPutStrLn (show mid ++ "unlocked" ++ show k)
+#endif    
     writeIORef tlog lg{lockingSet = Set.empty}
     
 unlockTVars [] = return ()
-unlockTVars ((TVarAny (_,tvany)):xs) =    
-   do
-    _tvany <- takeMVar tvany
-    wq <- takeMVar (waitingQueue _tvany)    
-    putMVar (waitingQueue _tvany) []
-    takeMVar (lock _tvany)
-    mapM_ (\mv -> putMVar mv ()) wq
-    putMVar tvany _tvany
-    unlockTVars xs
+unlockTVars ((TVarAny (i,tvany)):xs) =    
+   uninterruptibleMask_ $
+    do
+       mid <- myThreadId
+#ifdef DEBUG
+       sPutStrLn (show mid ++ "will unlock TVar " ++ show i)
+#endif    
+       _tvany <- takeMVar tvany
+       wq <- takeMVar (waitingQueue _tvany)    
+       takeMVar (lock _tvany)
+#ifdef DEBUG
+       sPutStrLn (show mid ++ "removed lock of TVar " ++ show i)
+#endif    
+       putMVar (waitingQueue _tvany) []
+       mapM_ (\mv -> putMVar mv ()) wq
+       putMVar tvany _tvany
+#ifdef DEBUG
+       sPutStrLn (show mid ++ "unlock of TVar " ++ show i ++ "done")
+#endif    
+       unlockTVars xs
 
 -- | 'writeTVnWithLog' writes the newly created TVars during commit    
 writeTVnWithLog :: TLOG -- ^ the transaction log
@@ -402,26 +494,30 @@ writeTVnWithLog (TLOG tlog) =
     let k = lockingSet lg
     let toBeWritten = Set.elems ln
     writeNew toBeWritten
-    writeIORef tlog lg{tripelStack=((la,Set.empty,Set.empty):xs)}
+    writeIORef tlog lg{tripelStack=((la,Set.empty,lw):xs)}
     
 writeNew [] = return ()
-writeNew ((TVarAny (_,tvany)):xs) =
+writeNew ((TVarAny (i,tvany)):xs) =
  do
   mid <- myThreadId
   _tvany <- takeMVar tvany
   lmap <- takeMVar (localContent _tvany)
-  case (Map.lookup mid lmap) of
+  if Map.null (Map.delete mid lmap) then
+   case (Map.lookup mid lmap) of
     Just conp ->
       do 
        (con:_) <- readIORef conp
        takeMVar (globalContent _tvany)
        putMVar (globalContent _tvany) con
        putMVar (localContent _tvany) (Map.empty)
-       takeMVar (notifyList _tvany)
-       putMVar (notifyList _tvany) (Set.empty)
        putMVar tvany _tvany
        writeNew xs
-
+    else 
+#ifdef DEBUG
+      do
+       sPutStrLn ((show mid) ++ " panic: keys in localcontent" ++ show ( Map.keys (Map.delete mid lmap)) ++ "of local TVar" ++ show i)
+#endif       
+       error "panic"
        
       
 -- ------------------------------------------------
@@ -517,13 +613,17 @@ commit (TLOG tlog) =
    sPutStrLn (show mid ++ " writeEnd finished") 
    -- debugTLOG (tlog)   
 #endif
---    yield    
+#ifdef DEBUG                    
+   sPutStrLn (show mid ++ " unlockTV starts")   
+   -- debugTLOG (tlog)   
+#endif
    unlockTVWithLog (TLOG tlog) -- unlockTV phase
 #ifdef DEBUG                    
    sPutStrLn (show mid ++ " unlockTV finished")   
    -- debugTLOG (tlog)   
 #endif
-           
+
+
            
    
 
@@ -542,14 +642,14 @@ retryCGlobWithLog (TLOG tlog) =
     lg <- readIORef tlog  -- access the Log-File
     mid <- myThreadId
     let t = Set.elems (readTVars lg)
-    mask_ $ 
+    uninterruptibleMask_ $ 
       do
        removeNotifyEntries mid t
        writeIORef tlog lg{readTVars = Set.empty}
        
 removeNotifyEntries mid [] = return ()
-removeNotifyEntries mid ((TVarAny (_,tvany)):xs) =
-  mask_ $
+removeNotifyEntries mid ((TVarAny (i,tvany)):xs) =
+  uninterruptibleMask_ $
    do
     _tvany <- takeMVar tvany
     nlist <- takeMVar (notifyList _tvany)
@@ -574,14 +674,14 @@ retryEndWithLog (TLOG tlog) =
     let ((la,ln,lw):xs) = tripelStack lg
     let tvset = (la `Set.union` ln `Set.union` lw)
     let toBeResetted = Set.elems tvset
-    mask_ $
+    uninterruptibleMask_ $
       do 
        resetEntries mid toBeResetted    
        writeIORef tlog (lg{tripelStack = ((Set.empty,Set.empty, Set.empty):xs)})
     
 resetEntries mid [] = return ()
 resetEntries mid ((TVarAny (_,tvany)):xs) =    
-  mask_ $
+  uninterruptibleMask_ $
        do
          _tvany <- takeMVar tvany
          localmap <- takeMVar (localContent _tvany)
@@ -602,15 +702,15 @@ globalRetry (TLOG tlog) =
  catch (
   do
    mid <- myThreadId
-   mask_ (retryCGlobWithLog (TLOG tlog))
+   uninterruptibleMask_ (retryCGlobWithLog (TLOG tlog))
 #ifdef DEBUG                    
    sPutStrLn (show mid ++ " finished retryCGlob")
 #endif
-   mask_ (retryEndWithLog  (TLOG tlog))
+   uninterruptibleMask_ (retryEndWithLog  (TLOG tlog))
 #ifdef DEBUG                    
    sPutStrLn (show mid ++ " finished retryEnd")
 #endif 
-    ) (\RetryException -> globalRetry (TLOG tlog))
+    ) (\(RetryException) -> globalRetry (TLOG tlog))
    
 -- ------------------------------------------------
 -- orElseWithLog (performs (orElse), i.e duplication of stacks etc.
@@ -630,7 +730,7 @@ orElseWithLog (TLOG tlog) =
     let ((la,ln,lw):xs) = tripelStack lg
 
     -- double all local TVars
-    mask_ (
+    uninterruptibleMask_ (
       do 
        doubleLocalTVars mid (Set.elems la)
        writeIORef tlog (lg{tripelStack=(la,ln,lw):((la,ln,lw):xs)})
@@ -638,7 +738,7 @@ orElseWithLog (TLOG tlog) =
      
 doubleLocalTVars mid [] = return ()
 doubleLocalTVars mid ((TVarAny (_,tvany)):xs) =
- mask_ $
+ uninterruptibleMask_ $
    do
     _tvany <- takeMVar tvany
     localmap <- takeMVar (localContent _tvany)
@@ -667,7 +767,7 @@ orRetryWithLog (TLOG tlog) =
     sPutStrLn (show mid ++ " orRetry")
 #endif    
     let ((la,ln,lw):xs) = tripelStack lg
-    mask_ $ 
+    uninterruptibleMask_ $ 
       do
         undoubleLocalTVars mid (Set.elems la)    
         writeIORef tlog (lg{tripelStack=(xs)})
@@ -675,7 +775,7 @@ orRetryWithLog (TLOG tlog) =
     
 undoubleLocalTVars mid [] = return []
 undoubleLocalTVars mid ((TVarAny (_,tvany)):xs) =
- mask_ $
+ uninterruptibleMask_ $
     do
       _tvany <- takeMVar tvany
       localmap <- takeMVar (localContent _tvany)
@@ -697,12 +797,15 @@ newGlobalTVar content =
     content_local   <- newMVar (Map.empty)     
     notify_list     <- newMVar (Set.empty)
     unset_lock      <- newEmptyMVar
+    -- loc <- newIORef Nothing
     content_waiting_queue <- newMVar []                  -- empty broadcast list
     content_tvarx <-         newMVar (TV {globalContent = content_global,
                                   localContent  = content_local,
                                   notifyList    = notify_list,
                                   lock          = unset_lock,   
-                                  waitingQueue  = content_waiting_queue})
+                                  waitingQueue  = content_waiting_queue
+                                  -- local = loc
+                                  })
     let tvany = TVarAny (tvar_Id,content_tvarx)
     let tva   = TVarA content_tvarx
     let tvar = TVar (tva,tvany)

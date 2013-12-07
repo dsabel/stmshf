@@ -69,6 +69,9 @@ instance Eq TVarAny where
 instance Ord TVarAny where
  compare (TVarAny (i,_)) (TVarAny (j,_)) = compare i j
  
+instance Show TVarAny where
+ show (TVarAny (i,_)) = show i
+
 instance Eq (TVar a) where
  (TVar (TVarA l,_)) == (TVar (TVarA r,_)) = l == r
 

@@ -505,12 +505,6 @@ commit (TLOG tlog) =
    sPutStrLn (show mid ++ " writeTV finished")
    -- debugTLOG (tlog)   
 #endif
---    yield    
-   unlockTVWithLog (TLOG tlog) -- unlockTV phase
-#ifdef DEBUG                    
-   sPutStrLn (show mid ++ " unlockTV finished")   
-   -- debugTLOG (tlog)   
-#endif
 --    yield   
    writeTVnWithLog (TLOG tlog) -- writeTVn phase
 #ifdef DEBUG                    
@@ -524,6 +518,11 @@ commit (TLOG tlog) =
    -- debugTLOG (tlog)   
 #endif
 --    yield    
+   unlockTVWithLog (TLOG tlog) -- unlockTV phase
+#ifdef DEBUG                    
+   sPutStrLn (show mid ++ " unlockTV finished")   
+   -- debugTLOG (tlog)   
+#endif
            
            
    

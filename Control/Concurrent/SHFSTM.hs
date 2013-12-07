@@ -49,6 +49,9 @@ import Control.Concurrent.SHFSTM.Internal.Debug(sPutStrLn)
 #endif
 -- | The STM-monad
 
+
+
+
 -- The  data type STM, the operations store the continuation    
 data STM a = Return a 
            | forall b. NewTVar b (TVar b -> STM a)
@@ -69,7 +72,7 @@ instance Monad STM where
     case m of
       Return x -> f x
       Retry  -> Retry
-      NewTVar x cont -> NewTVar x (\i -> (cont i >>= f))
+      NewTVar x cont -> NewTVar x (\i -> (cont i >>= f)) 
       ReadTVar x cont -> ReadTVar x (\i -> (cont i >>= f))
       WriteTVar v x cont -> WriteTVar v x (cont >>= f)
       OrElse a1 a2 cont -> OrElse a1 a2 (\i -> cont i >>= f)
@@ -133,21 +136,23 @@ newTVarIO x = atomically (newTVar x)
 atomically :: STM a -> IO a
 atomically act =
   do
-#ifdef DEBUG    
     mid <- myThreadId
+#ifdef DEBUG    
     sPutStrLn (show mid ++ " starts transaction")
 #endif
     tlog <- emptyTLOG
     catch (performSTM tlog act) 
           (\e -> case e of
-                   RetryException ->  do
-                                       mask_ ( do 
+                   RetryException   ->  do
+                                          uninterruptibleMask_ ( do 
+                                               
 #ifdef DEBUG    
                                                    sPutStrLn ((show mid) ++  " got retry")
 #endif
+                                                   
                                                    globalRetry tlog)
-                                       atomically act
-                   other -> throw e)
+                                          atomically act
+                   other -> putStrLn ("other exception" ++ show mid) >> error "error")
 
 
                    
@@ -161,7 +166,7 @@ performSTM tlog act =
                mid <- myThreadId
                sPutStrLn ((show mid) ++  "USERDEFINED RETRY")
 #endif
-               waitForExternalRetry -- wait forever until a retry-exception is received
+               waitForExternalRetry -- forever until a retry-exception is received
     NewTVar x cont -> do
                        tv <- newTVarWithLog tlog x
                        performSTM tlog (cont tv) 
@@ -212,6 +217,6 @@ waitForExternalRetry =
   wait x
    where wait x  =  
             catch (takeMVar x >> return undefined) 
-                  (\e -> case e of BlockedIndefinitelyOnMVar -> wait x
+                  (\e -> case e of BlockedIndefinitelyOnMVar -> putStrLn "BLOCKED IN RETRYWAT" >> wait x
                                    _ -> throw e)
     

@@ -5,33 +5,47 @@ import Control.Concurrent
 import Control.Concurrent.SHFSTM
 import Control.Concurrent.SHFSTM.Internal.Debug
 import Control.Monad
+import System.Environment
 -- import Control.Concurrent.Future
 
 main = do 
-  putStrLn "Please choose between different tests"
-  putStrLn "====================================="
-  putStrLn "(1) multiple threads increase the value of a single TVar"
-  putStrLn "(2) dining philosophers"
-  putStrLn "(3) computation on a nxn matrix with nxn threads"
-  putStrLn "(4) Example: MVars encoded by STM"
-  
+  l <- getArgs
+  if length l < 2 then do
+           putStrLn "Please choose between different tests"
+           putStrLn "====================================="
+           putStrLn "(1) multiple threads increase the value of a single TVar"
+           putStrLn "(2) dining philosophers"
+           putStrLn "(3) computation on a nxn matrix with nxn threads"
+           putStrLn "(4) Example: MVars encoded by STM"
+           f <- readLn -- catch (readLn) (\_ -> main)
+           case f of
+             1 -> mainSingleTVar 0
+             2 -> diningPhilosophers 0
+             3 -> mainMatrix 0
+             4 -> mainMVar 0
+             _ -> main
+   else do
+    let (a:b:_) = l
+    let x = read a
+    let y = read b
+    case x of
+             1 -> mainSingleTVar y
+             2 -> diningPhilosophers y
+             3 -> mainMatrix y
+             4 -> mainMVar y
+             _ -> main
+    
 
-  f <- readLn -- catch (readLn) (\_ -> main)
-  case f of
-    1 -> mainSingleTVar
-    2 -> diningPhilosophers
-    3 -> mainMatrix
-    4 -> mainMVar
-    _ -> main
-  
-
-mainSingleTVar = do
-  putStrLn "This example uses a single TVar with content 0 at the beginning"
-  putStrLn "Then every thread performs the transaction of increasing the TVar by one"
-  putStrLn "Finally, the content of the the TVar is printed by some further thread"
-  putStrLn "=================================================="
-  putStrLn "How many threads should run?"
-  num <- readLn
+mainSingleTVar i = do
+  num <- do
+   if i == 0 then do
+     putStrLn "This example uses a single TVar with content 0 at the beginning"
+     putStrLn "Then every thread performs the transaction of increasing the TVar by one"
+     putStrLn "Finally, the content of the the TVar is printed by some further thread"
+     putStrLn "=================================================="
+     putStrLn "How many threads should run?"
+     readLn
+    else return i
   x <- newTVarIO 0
   mvars <- sequence $ replicate num (newEmptyMVar)
   sequence_ [forkIO (increaseTVar x >> putMVar y ()) | y <- mvars]
@@ -42,10 +56,13 @@ mainSingleTVar = do
   increaseTVar x = 
    atomically (readTVar x >>= (writeTVar x) . (+1))
 
-diningPhilosophers = do
-  putStrLn "=================================================="
-  putStrLn "How many philosophers?"
-  n <- readLn
+diningPhilosophers i = do
+  n <- do
+   if i == 0 then do
+     putStrLn "=================================================="
+     putStrLn "How many philosophers?"
+     readLn
+    else return i
   forks <- atomically $ sequence (replicate n (newTVar 0))
   sequence_ [forkIO $ philosopher n i forks | i <- [0..(n-1)]]
   threadDelay 100000000000
@@ -76,7 +93,7 @@ releaseForks left right = atomically $
   writeTVar left 0
   writeTVar right 0
 
-mainMatrix =
+mainMatrix i =
  do
   putStrLn "==========================================================="
   putStrLn "This example starts with a nxn matrix of the form"
@@ -87,8 +104,12 @@ mainMatrix =
   putStrLn "There are nxn threads for every entry one"
   putStrLn "Each thread reads the values 'around' its cell and"
   putStrLn "writes the maximal read value into its cell"
-  putStrLn "Choose n?"
-  n <- readLn
+  n <- do
+   if i == 0 then do
+     putStrLn "=================================================="
+     putStrLn "Choose n?"
+     readLn
+    else return i
   matrix n  
   
   
@@ -131,7 +152,7 @@ someDelay =
 #endif    
     threadDelay (2^i)
 
-mainMVar = 
+mainMVar i = 
    do
      putStrLn "This example uses MVars encoded by STM."
      putStrLn "An MVar is represented as a pair (a,b) of TVars (with Integers as content)"
@@ -165,8 +186,11 @@ mainMVar =
      putStrLn ""
      putStrLn "The example now uses a single MVar to protect printing on stdout"
      putStrLn "And several threads want to print a message."
-     putStrLn "Choose the number of threads!"
-     n <- readLn
+     n <- do
+      if i == 0 then do
+        putStrLn "Choose the number of threads!"
+        readLn
+       else return i
      mainMyMVar n
 
 type MyMVar = (TVar Integer,TVar Integer)   

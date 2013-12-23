@@ -21,6 +21,7 @@ module Control.Concurrent.SHFSTM.Internal.TVar (
  TVarA(..),
  TVarAny(..),
  ITVar(..),
+ TVarId,
  -- * Operations
  nextCounter
  ) where

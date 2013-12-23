@@ -19,33 +19,32 @@ main = do
            putStrLn "(4) Example: MVars encoded by STM"
            f <- readLn -- catch (readLn) (\_ -> main)
            case f of
-             1 -> mainSingleTVar 0
-             2 -> diningPhilosophers 0
-             3 -> mainMatrix 0
-             4 -> mainMVar 0
+             1 -> mainSingleTVar []
+             2 -> diningPhilosophers []
+             3 -> mainMatrix []
+             4 -> mainMVar []
              _ -> main
    else do
-    let (a:b:_) = l
+    let (a:b) = l
     let x = read a
-    let y = read b
     case x of
-             1 -> mainSingleTVar y
-             2 -> diningPhilosophers y
-             3 -> mainMatrix y
-             4 -> mainMVar y
+             1 -> mainSingleTVar b
+             2 -> diningPhilosophers b
+             3 -> mainMatrix b
+             4 -> mainMVar b
              _ -> main
     
 
 mainSingleTVar i = do
   num <- do
-   if i == 0 then do
+   if null i then do
      putStrLn "This example uses a single TVar with content 0 at the beginning"
      putStrLn "Then every thread performs the transaction of increasing the TVar by one"
      putStrLn "Finally, the content of the the TVar is printed by some further thread"
      putStrLn "=================================================="
      putStrLn "How many threads should run?"
      readLn
-    else return i
+    else return (read $ head i)
   x <- newTVarIO 0
   mvars <- sequence $ replicate num (newEmptyMVar)
   sequence_ [forkIO (increaseTVar x >> putMVar y ()) | y <- mvars]
@@ -58,24 +57,32 @@ mainSingleTVar i = do
 
 diningPhilosophers i = do
   n <- do
-   if i == 0 then do
+   if null i then do
      putStrLn "=================================================="
      putStrLn "How many philosophers?"
      readLn
-    else return i
+    else return (read $ head i)
+  maxrounds <- do
+   if null i || null (tail i)  then do
+     putStrLn "=================================================="
+     putStrLn "How many rounds?"
+     readLn
+    else return (read $ head $ tail i)
   forks <- atomically $ sequence (replicate n (newTVar 0))
-  sequence_ [forkIO $ philosopher n i forks | i <- [0..(n-1)]]
-  threadDelay 100000000000
+  mv <- newEmptyMVar
+  sequence_ [forkIO (philosopher maxrounds n i forks >> putMVar mv ()) | i <- [0..(n-1)]]
+  sequence_ [takeMVar mv | i <- [0..(n-1)]]
+  putStrLn "done"
 
      
-
-philosopher n i forks = do
+philosopher 0 n i forks = return ()
+philosopher r n i forks = do
   getForks (forks!!i) (forks!!((i+1) `mod` n))
   sPutStrLn $ "philosopher " ++ show i ++ " eats ..."
   releaseForks (forks!!i) (forks!!((i+1) `mod` n))
   sPutStrLn $ "philosopher " ++ show i ++ " thinks ..."
   someDelay
-  philosopher n i forks  
+  philosopher (r-1) n i forks  
      
      
 getForks left right = atomically $
@@ -105,11 +112,11 @@ mainMatrix i =
   putStrLn "Each thread reads the values 'around' its cell and"
   putStrLn "writes the maximal read value into its cell"
   n <- do
-   if i == 0 then do
+   if null i then do
      putStrLn "=================================================="
      putStrLn "Choose n?"
      readLn
-    else return i
+    else return (read $ head i)
   matrix n  
   
   
@@ -187,10 +194,10 @@ mainMVar i =
      putStrLn "The example now uses a single MVar to protect printing on stdout"
      putStrLn "And several threads want to print a message."
      n <- do
-      if i == 0 then do
+      if null i then do
         putStrLn "Choose the number of threads!"
         readLn
-       else return i
+       else return (read $ head i)
      mainMyMVar n
 
 type MyMVar = (TVar Integer,TVar Integer)   

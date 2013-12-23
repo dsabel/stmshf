@@ -157,7 +157,7 @@ tryReadTVarWithLog (TLOG tlog) ptvar@(TVar (TVarA tva,tvany@(TVarAny tx))) = uni
                 do 
                  blockvar <- newEmptyMVar
                  wq <- takeMVar (waitingQueue _tva)
-                 putMVar (waitingQueue _tva) (wq ++ [blockvar])
+                 putMVar (waitingQueue _tva) (blockvar:wq)
                  putMVar tva _tva
 #ifdef DEBUG                    
                  -- sPutStrLn (show mid ++ "wait in readTVar")
@@ -236,8 +236,6 @@ tryWriteTVarWithLog (TLOG tlog) ptvar@(TVar (TVarA tva,tvany@(TVarAny (id,m)))) 
            )
 
 
--- | 'writeStartWithLog' starts the commit phase, by 
--- locking the read and written TVars
            
 writeStartWithLog' (TLOG tlog) =
  uninterruptibleMask_ $
@@ -261,6 +259,9 @@ writeStartWithLog' (TLOG tlog) =
                    return (Right ())
        Left lock -> return (Left lock)
     
+-- | 'writeStartWithLog' starts the commit phase, by 
+-- locking the read and written TVars
+
 writeStartWithLog :: TLOG -- ^ the transaction log
                      -> IO () 
 writeStartWithLog (TLOG tlog) =
@@ -545,19 +546,19 @@ clearEntries ((TVarAny (_,tvany)):xs) =
 
 -- | 'commit' performs the operations for committing
 --
---   - 'writeStartWithLog' to lock the to-be-written TVars
+--   - 'writeStartWithLog' to lock the read and to-be-written TVars
 --
 --   - 'writeClearWithLog' (iteratively) to remove the notify entries of the committing transaction
 --
 --   - 'sendRetryWithLog' (iteratively) to abort conflicting transactions
 --
---   - 'writeTVarWithLog' (iteratively) to write the local contents in to the global memory
---
---   - 'unlockTVWithLog' (iteratively) to unlock the global TVars
+--   - 'writeTVWithLog' (iteratively) to write the local contents in to the global memory
 --
 --   - 'writeTVnWithLog' (iteratively) to create the newly created TVars in the global memory
 --
 --   - 'writeEndWithLog'  to clear the local TVar stack
+--
+--   - 'unlockTVWithLog' (iteratively) to unlock the global TVars
  
 commit :: TLOG -- ^ the transaction logs
        -> IO () 
